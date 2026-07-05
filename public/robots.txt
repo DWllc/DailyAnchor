@@ -1,4 +1,8 @@
 User-agent: *
 Allow: /
+User-agent: *
+Allow: /
+
+Sitemap: https://trydailyanchor.com/sitemap.xml
 
 Sitemap: https://YOUR-DOMAIN-HERE.com/sitemap.xml
