@@ -815,6 +815,7 @@ export default function App() {
       medication: medication, proteinGoal: "", carbGoal: data.goals.includes("keto") ? 25 : "",
       waiverAccepted: !!data.waiverAccepted, createdDate: today,
       darkMode: false, fontSize: "medium", showAffirmation: true,
+      email: data.email || "",
     };
     setProfile(newProfile);
     setTasksLib(built);
@@ -1052,8 +1053,48 @@ function Onboarding({ onComplete }) {
   const isKetoGoal = goals.includes("keto");
   const steps = ["welcome", "overview", "waiver", "name", "pin", "goals"]
     .concat(needsWeight ? ["weight"] : [])
-    .concat(["medication", "notifications"]);
+    .concat(["medication", "notifications", "subscribe"]);
   const stepKey = steps[step];
+  const [email, setEmail] = useState("");
+  const [checkoutLoading, setCheckoutLoading] = useState(false);
+  const [checkoutError, setCheckoutError] = useState("");
+
+  const finishOnboarding = (extra) => {
+    onComplete({
+      name: name.trim(), pin, goals, customGoalText, startWeight, goalWeight,
+      notifications, medsNeeded, medTimes, waiverAccepted,
+      email: email.trim(), ...extra,
+    });
+  };
+
+  const startCheckout = async () => {
+    if (!email.trim()) {
+      setCheckoutError("Please enter your email.");
+      return;
+    }
+    setCheckoutError("");
+    setCheckoutLoading(true);
+    // Save the profile locally first, so if checkout is abandoned or the
+    // browser navigates away, the app still remembers this person's setup.
+    finishOnboarding({});
+    try {
+      const res = await fetch("/api/create-checkout-session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.trim() }),
+      });
+      const data = await res.json();
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        setCheckoutError("Something went wrong starting checkout. Please try again.");
+        setCheckoutLoading(false);
+      }
+    } catch {
+      setCheckoutError("Something went wrong starting checkout. Please try again.");
+      setCheckoutLoading(false);
+    }
+  };
 
   const toggleGoal = (id) => setGoals((g) => (g.includes(id) ? g.filter((x) => x !== id) : [...g, id]));
   const next = () => setStep((s) => Math.min(s + 1, steps.length - 1));
@@ -1243,9 +1284,44 @@ function Onboarding({ onComplete }) {
           </>
         )}
 
+        {stepKey === "subscribe" && (
+          <>
+            <Sparkles size={26} style={{ color: "var(--sage-dark)" }} />
+            <h2 className="da-h2" style={{ marginTop: 8 }}>Start your free trial</h2>
+            <p className="da-muted">
+              Try Daily Anchor free for 7 days. After that, it's $4.99/month - cancel anytime, and you
+              won't be charged if you cancel during the trial.
+            </p>
+            <input
+              type="email"
+              className="da-input"
+              placeholder="you@example.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              style={{ marginTop: 10, width: "100%" }}
+            />
+            {checkoutError && (
+              <p className="da-muted" style={{ color: "#c0392b", marginTop: 6, fontSize: 13 }}>{checkoutError}</p>
+            )}
+            <button
+              className="da-btn da-btn-primary" style={{ width: "100%", marginTop: 14 }}
+              disabled={checkoutLoading}
+              onClick={startCheckout}
+            >
+              {checkoutLoading ? "Starting checkout..." : "Start free trial"}
+            </button>
+            <button
+              className="da-add-link" style={{ marginTop: 12 }}
+              onClick={() => finishOnboarding({})}
+            >
+              Skip for now
+            </button>
+          </>
+        )}
+
         <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
           {step > 0 && <button className="da-btn da-btn-ghost" onClick={back}><ChevronLeft size={16} /> Back</button>}
-          {stepKey !== "notifications" ? (
+          {stepKey !== "notifications" && stepKey !== "subscribe" && (
             <button
               className="da-btn da-btn-primary" style={{ flex: 1 }}
               disabled={(stepKey === "name" && !name.trim()) || (stepKey === "waiver" && !waiverAccepted)}
@@ -1253,12 +1329,13 @@ function Onboarding({ onComplete }) {
             >
               Continue <ChevronRight size={16} />
             </button>
-          ) : (
+          )}
+          {stepKey === "notifications" && (
             <button
               className="da-btn da-btn-primary" style={{ flex: 1 }}
-              onClick={() => onComplete({ name: name.trim(), pin, goals, customGoalText, startWeight, goalWeight, notifications, medsNeeded, medTimes, waiverAccepted })}
+              onClick={next}
             >
-              Start my first day
+              Continue <ChevronRight size={16} />
             </button>
           )}
         </div>
@@ -1716,8 +1793,34 @@ function SettingsView({ profile, setProfile, tasksLib, removeTask, editTask, mov
     } catch (e) {}
   };
 
+  const [subStatus, setSubStatus] = useState(profile.email ? "checking" : "none");
+  useEffect(() => {
+    if (!profile.email) { setSubStatus("none"); return; }
+    fetch(`/api/check-subscription-status?email=${encodeURIComponent(profile.email)}`)
+      .then((r) => r.json())
+      .then((d) => setSubStatus(d.subscribed ? (d.status || "active") : "inactive"))
+      .catch(() => setSubStatus("error"));
+  }, [profile.email]);
+
+  const subStatusLabel = {
+    checking: "Checking...", trialing: "Free trial active", active: "Active",
+    inactive: "No active subscription", none: "Not started", error: "Unable to check right now",
+  }[subStatus] || subStatus;
+
   return (
     <div className="da-scroll">
+      <SectionLabel text="Subscription" />
+      <div className="da-card">
+        {profile.email ? (
+          <>
+            <p className="da-muted" style={{ fontSize: 13 }}>Account: {profile.email}</p>
+            <p className="da-muted" style={{ fontSize: 13, marginTop: 4 }}>Status: {subStatusLabel}</p>
+          </>
+        ) : (
+          <p className="da-muted" style={{ fontSize: 13 }}>You haven't started a subscription yet.</p>
+        )}
+      </div>
+
       <SectionLabel text="Appearance" />
       <div className="da-card">
         <label className="da-toggle-row">
